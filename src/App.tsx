@@ -7,6 +7,7 @@ import { doc, getDoc, getDocs, collection, query, orderBy, limit, onSnapshot, se
 import { GameState, Question, UserProfile, Team } from './types';
 import { seedDatabase } from './seed';
 import { cn } from './lib/utils';
+import { Analytics } from '@vercel/analytics/react';
 
 // --- Components ---
 
@@ -900,6 +901,7 @@ export default function App() {
       {/* Background Glows */}
       <div className="fixed top-0 left-1/4 w-96 h-96 bg-cyan-500/10 blur-[120px] rounded-full -z-10" />
       <div className="fixed bottom-0 right-1/4 w-96 h-96 bg-purple-600/10 blur-[120px] rounded-full -z-10" />
+      <Analytics />
     </div>
   );
 }
