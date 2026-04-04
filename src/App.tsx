@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, Users, Play, LogOut, ShieldCheck, User as UserIcon, Timer, Music, Image as ImageIcon, CheckCircle2, XCircle } from 'lucide-react';
+import { Trophy, Users, Play, LogOut, ShieldCheck, User as UserIcon, Timer, Music, Image as ImageIcon, CheckCircle2, XCircle, Maximize, Minimize, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { doc, getDoc, getDocs, collection, query, orderBy, limit, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { GameState, Question, UserProfile, Team } from './types';
 import { seedDatabase } from './seed';
 import { cn } from './lib/utils';
-import { Analytics } from '@vercel/analytics/react';
 
 // --- Components ---
 
@@ -202,7 +201,28 @@ const AuditoriumDisplay = () => {
   const [leaderboard, setLeaderboard] = useState<UserProfile[]>([]);
   const [teamLeaderboard, setTeamLeaderboard] = useState<Team[]>([]);
   const [timeLeft, setTimeLeft] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   useEffect(() => {
     const isAudio = currentQuestion?.type === 'audio' && currentQuestion.mediaUrl && currentQuestion.mediaUrl.trim().startsWith('http');
@@ -271,7 +291,19 @@ const AuditoriumDisplay = () => {
   }, [gameState?.status, gameState?.startTime, currentQuestion]);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white p-12 flex flex-col items-center justify-center overflow-hidden">
+    <div ref={containerRef} className="min-h-screen bg-[#050505] text-white p-12 flex flex-col items-center justify-center overflow-hidden relative">
+      <button 
+        onClick={toggleFullscreen}
+        className="absolute top-8 right-8 p-4 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/10 transition-all z-50 group"
+        title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+      >
+        {isFullscreen ? (
+          <Minimize className="w-6 h-6 text-gray-400 group-hover:text-white" />
+        ) : (
+          <Maximize className="w-6 h-6 text-gray-400 group-hover:text-white" />
+        )}
+      </button>
+
       <AnimatePresence mode="wait">
         {gameState?.status === 'question_active' && currentQuestion ? (
           <motion.div 
@@ -409,6 +441,8 @@ const AdminDashboard = () => {
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [adminMessage, setAdminMessage] = useState<{ text: string, type: 'info' | 'error' } | null>(null);
+  const [showDangerZone, setShowDangerZone] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   useEffect(() => {
     if (adminMessage) {
@@ -610,12 +644,6 @@ const AdminDashboard = () => {
                 Transition to Round 2
               </button>
               <button 
-                onClick={() => updateGameState({ status: 'idle', currentQuestionId: null })}
-                className="w-full py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all"
-              >
-                Reset Game
-              </button>
-              <button 
                 onClick={seedDatabase}
                 className="w-full py-3 bg-cyan-900/30 border border-cyan-500/30 text-cyan-400 rounded-xl font-bold transition-all hover:bg-cyan-900/50"
               >
@@ -629,6 +657,64 @@ const AdminDashboard = () => {
                 Open Auditorium Display
               </a>
             </div>
+          </div>
+
+          <div className="bg-red-500/5 border border-red-500/10 rounded-2xl overflow-hidden">
+            <button 
+              onClick={() => setShowDangerZone(!showDangerZone)}
+              className="w-full p-4 flex items-center justify-between text-red-400 hover:bg-red-500/5 transition-all"
+            >
+              <div className="flex items-center gap-2 font-bold">
+                <AlertTriangle className="w-4 h-4" />
+                DANGER ZONE
+              </div>
+              {showDangerZone ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            
+            <AnimatePresence>
+              {showDangerZone && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="px-4 pb-4"
+                >
+                  <div className="p-4 bg-red-500/10 rounded-xl border border-red-500/20 space-y-4">
+                    <p className="text-xs text-red-300">These actions are irreversible and will reset the entire game state for all players.</p>
+                    {confirmReset ? (
+                      <div className="space-y-2">
+                        <p className="text-sm font-bold text-red-400">Are you absolutely sure?</p>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => {
+                              updateGameState({ status: 'idle', currentQuestionId: null });
+                              setAdminMessage({ text: "Game state reset to idle", type: 'info' });
+                              setConfirmReset(false);
+                            }}
+                            className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-sm transition-all"
+                          >
+                            Yes, Reset
+                          </button>
+                          <button 
+                            onClick={() => setConfirmReset(false)}
+                            className="flex-1 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg font-bold text-sm transition-all"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => setConfirmReset(true)}
+                        className="w-full py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 rounded-lg font-bold text-sm transition-all"
+                      >
+                        Reset Game State
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>
@@ -901,7 +987,6 @@ export default function App() {
       {/* Background Glows */}
       <div className="fixed top-0 left-1/4 w-96 h-96 bg-cyan-500/10 blur-[120px] rounded-full -z-10" />
       <div className="fixed bottom-0 right-1/4 w-96 h-96 bg-purple-600/10 blur-[120px] rounded-full -z-10" />
-      <Analytics />
     </div>
   );
 }
