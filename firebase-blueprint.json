@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and game stats",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "student"] },
+        "totalScore": { "type": "number" },
+        "teamId": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "GameState": {
+      "title": "GameState",
+      "description": "Global game state",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["idle", "question_active", "showing_results", "round_transition", "game_over"] },
+        "currentQuestionId": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "round": { "type": "number" }
+      }
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Quiz question",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "type": { "type": "string", "enum": ["mcq", "image", "audio"] },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "correctIndex": { "type": "number" },
+        "mediaUrl": { "type": "string" },
+        "points": { "type": "number" },
+        "duration": { "type": "number" }
+      }
+    },
+    "Response": {
+      "title": "Response",
+      "description": "Student response to a question",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "questionId": { "type": "string" },
+        "selectedIndex": { "type": "number" },
+        "timeTaken": { "type": "number" },
+        "pointsEarned": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Team": {
+      "title": "Team",
+      "description": "Team for Round 2",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "memberUids": { "type": "array", "items": { "type": "string" } },
+        "totalScore": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "User", "description": "User profiles" },
+    "/game_state/current": { "schema": "GameState", "description": "Global game state" },
+    "/questions/{id}": { "schema": "Question", "description": "Quiz questions" },
+    "/responses/{responseId}": { "schema": "Response", "description": "Student answers" },
+    "/teams/{id}": { "schema": "Team", "description": "Teams for Round 2" }
+  }
+}
