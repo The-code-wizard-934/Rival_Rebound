@@ -478,6 +478,45 @@ const AdminDashboard = () => {
     });
   };
 
+  const resetGame = async () => {
+    try {
+      const batch = writeBatch(db);
+      
+      // 1. Reset Game State
+      batch.update(doc(db, 'game_state', 'current'), { 
+        status: 'idle', 
+        currentQuestionId: null,
+        round: 1,
+        startTime: null
+      });
+
+      // 2. Reset User Scores and Team associations
+      const usersSnap = await getDocs(collection(db, 'users'));
+      usersSnap.docs.forEach(d => {
+        batch.update(d.ref, { totalScore: 0, teamId: null });
+      });
+
+      // 3. Reset Team Scores
+      const teamsSnap = await getDocs(collection(db, 'teams'));
+      teamsSnap.docs.forEach(d => {
+        batch.update(d.ref, { totalScore: 0 });
+      });
+
+      // 4. Delete Responses
+      const responsesSnap = await getDocs(collection(db, 'responses'));
+      responsesSnap.docs.forEach(d => {
+        batch.delete(d.ref);
+      });
+
+      await batch.commit();
+      setAdminMessage({ text: "Game, scores, and responses reset successfully", type: 'info' });
+      setConfirmReset(false);
+    } catch (error) {
+      console.error("Reset failed:", error);
+      setAdminMessage({ text: "Failed to reset game completely", type: 'error' });
+    }
+  };
+
   const deleteQuestion = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'questions', id));
@@ -686,11 +725,7 @@ const AdminDashboard = () => {
                         <p className="text-sm font-bold text-red-400">Are you absolutely sure?</p>
                         <div className="flex gap-2">
                           <button 
-                            onClick={() => {
-                              updateGameState({ status: 'idle', currentQuestionId: null });
-                              setAdminMessage({ text: "Game state reset to idle", type: 'info' });
-                              setConfirmReset(false);
-                            }}
+                            onClick={resetGame}
                             className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-sm transition-all"
                           >
                             Yes, Reset
