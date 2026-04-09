@@ -32,6 +32,7 @@ export interface Question {
   mediaUrl?: string;
   points: number;
   duration: number; // in seconds
+  round: number;
 }
 
 export interface UserResponse {

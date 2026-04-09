@@ -23,7 +23,8 @@ export const seedDatabase = async () => {
       options: ['Venus', 'Mars', 'Jupiter', 'Saturn'],
       correctIndex: 1,
       points: 100,
-      duration: 15
+      duration: 15,
+      round: 1
     },
     {
       id: '2',
@@ -33,7 +34,8 @@ export const seedDatabase = async () => {
       options: ['Eiffel Tower', 'Colosseum', 'Statue of Liberty', 'Big Ben'],
       correctIndex: 0,
       points: 150,
-      duration: 20
+      duration: 20,
+      round: 1
     },
     {
       id: '3',
@@ -42,7 +44,8 @@ export const seedDatabase = async () => {
       options: ['Seoul', 'Beijing', 'Tokyo', 'Bangkok'],
       correctIndex: 2,
       points: 100,
-      duration: 15
+      duration: 15,
+      round: 2
     }
   ];
 
