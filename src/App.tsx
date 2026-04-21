@@ -328,12 +328,18 @@ const AuditoriumDisplay = () => {
     const q = query(collection(db, 'users'), orderBy('totalScore', 'desc'), limit(16));
     const unsubscribeUsers = onSnapshot(q, (snapshot) => {
       setLeaderboard(snapshot.docs.map(doc => doc.data() as UserProfile));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'users'));
+    }, (error) => {
+      console.error("Users sync error:", error);
+      handleFirestoreError(error, OperationType.LIST, 'users');
+    });
 
-    const tq = query(collection(db, 'teams'), orderBy('totalScore', 'desc'));
-    const unsubscribeTeams = onSnapshot(tq, (snapshot) => {
-      setTeamLeaderboard(snapshot.docs.map(doc => doc.data() as Team));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'teams'));
+    const unsubscribeTeams = onSnapshot(collection(db, 'teams'), (snapshot) => {
+      const teamsData = snapshot.docs.map(doc => doc.data() as Team);
+      setTeamLeaderboard([...teamsData].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0)));
+    }, (error) => {
+      console.error("Teams sync error:", error);
+      handleFirestoreError(error, OperationType.LIST, 'teams');
+    });
 
     return () => {
       unsubscribeUsers();
