@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, Users, Play, LogOut, ShieldCheck, User as UserIcon, Timer, Music, Image as ImageIcon, CheckCircle2, XCircle, Maximize, Minimize, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trophy, Users, Play, LogOut, ShieldCheck, User as UserIcon, Timer, Music, Image as ImageIcon, CheckCircle2, XCircle, Maximize, Minimize, AlertTriangle, ChevronDown, ChevronUp, Activity, BarChart3, Volume2, VolumeX, Pause, RotateCcw } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { doc, getDoc, getDocs, collection, query, orderBy, limit, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch, where } from 'firebase/firestore';
 import { GameState, Question, UserProfile, Team } from './types';
@@ -239,8 +239,12 @@ const AuditoriumDisplay = () => {
   const [leaderboard, setLeaderboard] = useState<UserProfile[]>([]);
   const [teamLeaderboard, setTeamLeaderboard] = useState<Team[]>([]);
   const [allTeams, setAllTeams] = useState<(Team & { members: UserProfile[] })[]>([]);
+  const [audiencePoll, setAudiencePoll] = useState<number[]>([]);
   const [timeLeft, setTimeLeft] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -249,8 +253,11 @@ const AuditoriumDisplay = () => {
       const unsubscribe = onSnapshot(collection(db, 'teams'), async (snapshot) => {
         const teamsData = snapshot.docs.map(doc => doc.data() as Team);
         const teamsWithMembers = await Promise.all(teamsData.map(async (team) => {
-          const membersSnap = await getDocs(query(collection(db, 'users'), where('teamId', '==', team.id)));
-          return { ...team, members: membersSnap.docs.map(d => d.data() as UserProfile) };
+          const members = await Promise.all((team.memberUids || []).map(async (uid) => {
+            const userDoc = await getDoc(doc(db, 'users', uid));
+            return userDoc.data() as UserProfile;
+          }));
+          return { ...team, members: members.filter(m => !!m) };
         }));
         setAllTeams(teamsWithMembers);
       });
@@ -282,20 +289,29 @@ const AuditoriumDisplay = () => {
     if (gameState?.status === 'question_active' && isAudio) {
       if (!audioRef.current) {
         audioRef.current = new Audio(currentQuestion.mediaUrl);
+        audioRef.current.onended = () => setIsPlaying(false);
       }
-      audioRef.current.play().catch(e => {
-        if (e.name !== 'AbortError') {
-          console.error("Audio play failed", e);
-        }
-      });
+      
+      audioRef.current.volume = isMuted ? 0 : volume;
+      
+      if (isPlaying) {
+        audioRef.current.play().catch(e => {
+          if (e.name !== 'AbortError') {
+            console.error("Audio play failed", e);
+          }
+        });
+      } else {
+        audioRef.current.pause();
+      }
     } else {
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
         audioRef.current = null;
+        setIsPlaying(true);
       }
     }
-  }, [gameState?.status, currentQuestion]);
+  }, [gameState?.status, currentQuestion, volume, isMuted, isPlaying]);
 
   useEffect(() => {
     if (gameState?.currentQuestionId) {
@@ -324,6 +340,30 @@ const AuditoriumDisplay = () => {
       unsubscribeTeams();
     };
   }, []);
+
+  useEffect(() => {
+    if (gameState?.status === 'showing_results' && gameState.currentQuestionId && gameState.round === 2) {
+      const q = query(collection(db, 'responses'), where('questionId', '==', gameState.currentQuestionId), where('isAudience', '==', true));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const counts = [0, 0, 0, 0];
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (data.selectedIndex >= 0 && data.selectedIndex < 4) {
+            counts[data.selectedIndex]++;
+          }
+        });
+        const total = counts.reduce((a, b) => a + b, 0);
+        if (total > 0) {
+          setAudiencePoll(counts.map(c => Math.round((c / total) * 100)));
+        } else {
+          setAudiencePoll([]);
+        }
+      });
+      return () => unsubscribe();
+    } else {
+      setAudiencePoll([]);
+    }
+  }, [gameState?.status, gameState?.currentQuestionId, gameState?.round]);
 
   useEffect(() => {
     if (gameState?.status === 'question_active' && gameState.startTime && currentQuestion) {
@@ -378,14 +418,62 @@ const AuditoriumDisplay = () => {
               {currentQuestion.text}
             </h1>
             {currentQuestion.mediaUrl && (
-              <div className="flex justify-center">
-                {currentQuestion.type === 'image' ? (
-                  <img src={currentQuestion.mediaUrl} className="max-h-[40vh] rounded-3xl shadow-2xl border-4 border-white/10" referrerPolicy="no-referrer" />
-                ) : currentQuestion.type === 'audio' ? (
-                  <div className="w-48 h-48 bg-cyan-500 rounded-full flex items-center justify-center animate-pulse shadow-2xl shadow-cyan-500/50">
-                    <Music className="w-24 h-24 text-white" />
-                  </div>
-                ) : null}
+              <div className="flex flex-col items-center gap-6">
+                <div className="flex justify-center">
+                  {currentQuestion.type === 'image' ? (
+                    <img src={currentQuestion.mediaUrl} className="max-h-[40vh] rounded-3xl shadow-2xl border-4 border-white/10" referrerPolicy="no-referrer" />
+                  ) : currentQuestion.type === 'audio' ? (
+                    <div className="w-48 h-48 bg-cyan-500 rounded-full flex items-center justify-center animate-pulse shadow-2xl shadow-cyan-500/50 relative overflow-hidden">
+                      <Music className="w-24 h-24 text-white" />
+                      {!isPlaying && <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><Pause className="w-16 h-16 text-white" /></div>}
+                    </div>
+                  ) : null}
+                </div>
+
+                {currentQuestion.type === 'audio' && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-2xl flex items-center gap-6 shadow-2xl"
+                  >
+                    <button 
+                      onClick={() => setIsPlaying(!isPlaying)}
+                      className="p-3 bg-cyan-500 hover:bg-cyan-400 rounded-xl text-white transition-all shadow-lg shadow-cyan-500/20"
+                    >
+                      {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current" />}
+                    </button>
+
+                    <button 
+                      onClick={() => {
+                        if (audioRef.current) {
+                          audioRef.current.currentTime = 0;
+                          if (!isPlaying) setIsPlaying(true);
+                        }
+                      }}
+                      className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-white transition-all"
+                    >
+                      <RotateCcw className="w-6 h-6" />
+                    </button>
+
+                    <div className="flex items-center gap-3 min-w-[200px]">
+                      <button onClick={() => setIsMuted(!isMuted)} className="text-gray-400 hover:text-white transition-colors">
+                        {isMuted || volume === 0 ? <VolumeX className="w-6 h-6 text-red-400" /> : <Volume2 className="w-6 h-6" />}
+                      </button>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.01" 
+                        value={volume}
+                        onChange={(e) => {
+                          setVolume(parseFloat(e.target.value));
+                          if (isMuted) setIsMuted(false);
+                        }}
+                        className="flex-1 accent-cyan-500 h-1.5 bg-white/10 rounded-full cursor-pointer"
+                      />
+                    </div>
+                  </motion.div>
+                )}
               </div>
             )}
             <div className="grid grid-cols-2 gap-8">
@@ -424,48 +512,85 @@ const AuditoriumDisplay = () => {
             key="leaderboard"
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
-            className="max-w-4xl w-full space-y-6 md:space-y-8 my-auto"
+            className="max-w-6xl w-full space-y-6 md:space-y-8 my-auto"
           >
             <h1 className="text-4xl md:text-6xl font-black text-center mb-8 md:mb-12 bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent uppercase">
               {gameState.round === 2 ? "Team Leaderboard" : "Individual Leaderboard"}
             </h1>
-            <div className="space-y-3 md:space-y-4">
-              {gameState.round === 2 ? (
-                teamLeaderboard.map((team, i) => (
-                  <motion.div 
-                    key={team.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.1 }}
-                    className="flex items-center justify-between p-6 md:p-8 bg-white/5 border-2 border-cyan-500/20 rounded-3xl"
-                  >
-                    <div className="flex items-center gap-4 md:gap-8">
-                      <span className="text-2xl md:text-4xl font-black text-gray-500 w-12 md:w-16">#{i + 1}</span>
-                      <div className="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-cyan-500 to-purple-600 rounded-2xl flex items-center justify-center">
-                        <Users className="w-6 h-6 md:w-8 md:h-8 text-white" />
+            
+            <div className={cn("grid gap-8", gameState.round === 2 ? "grid-cols-1 lg:grid-cols-3" : "grid-cols-1")}>
+              <div className={cn("space-y-3 md:space-y-4", gameState.round === 2 ? "lg:col-span-2" : "")}>
+                {gameState.round === 2 ? (
+                  teamLeaderboard.map((team, i) => (
+                    <motion.div 
+                      key={team.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.1 }}
+                      className="flex items-center justify-between p-6 md:p-8 bg-white/5 border-2 border-cyan-500/20 rounded-3xl"
+                    >
+                      <div className="flex items-center gap-4 md:gap-8">
+                        <span className="text-2xl md:text-4xl font-black text-gray-500 w-12 md:w-16">#{i + 1}</span>
+                        <div className="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-cyan-500 to-purple-600 rounded-2xl flex items-center justify-center">
+                          <Users className="w-6 h-6 md:w-8 md:h-8 text-white" />
+                        </div>
+                        <span className="text-2xl md:text-4xl font-bold">{team.name}</span>
                       </div>
-                      <span className="text-2xl md:text-4xl font-bold">{team.name}</span>
+                      <span className="text-3xl md:text-5xl font-black text-cyan-400">{team.totalScore}</span>
+                    </motion.div>
+                  ))
+                ) : (
+                  leaderboard.map((user, i) => (
+                    <motion.div 
+                      key={user.uid}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.1 }}
+                      className="flex items-center justify-between p-4 md:p-6 bg-white/5 border border-white/10 rounded-2xl"
+                    >
+                      <div className="flex items-center gap-4 md:gap-6">
+                        <span className="text-2xl md:text-3xl font-black text-gray-500 w-10 md:w-12">#{i + 1}</span>
+                        <img src={user.photoURL} className="w-12 h-12 md:w-16 md:h-16 rounded-full border-2 border-cyan-500/50" referrerPolicy="no-referrer" />
+                        <span className="text-xl md:text-3xl font-bold">{user.displayName}</span>
+                      </div>
+                      <span className="text-2xl md:text-4xl font-black text-cyan-400">{user.totalScore}</span>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+
+              {gameState.round === 2 && (
+                <div className="space-y-6">
+                  <div className="p-6 bg-white/5 border border-white/10 rounded-3xl">
+                    <h3 className="text-xl font-black text-cyan-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                      <Users className="w-5 h-5" /> Audience Poll
+                    </h3>
+                    <div className="space-y-6">
+                      {audiencePoll.length > 0 ? (
+                        audiencePoll.map((percent, i) => (
+                          <div key={i} className="space-y-2">
+                            <div className="flex justify-between text-sm font-bold">
+                              <span className="text-gray-400">Option {String.fromCharCode(65 + i)}</span>
+                              <span className="text-white">{percent}%</span>
+                            </div>
+                            <div className="h-3 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                              <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: `${percent}%` }}
+                                className={cn(
+                                  "h-full rounded-full",
+                                  i === currentQuestion?.correctIndex ? "bg-green-500" : "bg-cyan-500/50"
+                                )}
+                              />
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-gray-500 italic text-center py-8">Waiting for audience responses...</p>
+                      )}
                     </div>
-                    <span className="text-3xl md:text-5xl font-black text-cyan-400">{team.totalScore}</span>
-                  </motion.div>
-                ))
-              ) : (
-                leaderboard.map((user, i) => (
-                  <motion.div 
-                    key={user.uid}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.1 }}
-                    className="flex items-center justify-between p-4 md:p-6 bg-white/5 border border-white/10 rounded-2xl"
-                  >
-                    <div className="flex items-center gap-4 md:gap-6">
-                      <span className="text-2xl md:text-3xl font-black text-gray-500 w-10 md:w-12">#{i + 1}</span>
-                      <img src={user.photoURL} className="w-12 h-12 md:w-16 md:h-16 rounded-full border-2 border-cyan-500/50" referrerPolicy="no-referrer" />
-                      <span className="text-xl md:text-3xl font-bold">{user.displayName}</span>
-                    </div>
-                    <span className="text-2xl md:text-4xl font-black text-cyan-400">{user.totalScore}</span>
-                  </motion.div>
-                ))
+                  </div>
+                </div>
               )}
             </div>
           </motion.div>
@@ -541,14 +666,51 @@ const AdminDashboard = () => {
   const [adminMessage, setAdminMessage] = useState<{ text: string, type: 'info' | 'error' } | null>(null);
   const [showDangerZone, setShowDangerZone] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'remove_participants' | 'clear_q1' | 'clear_q2' | null>(null);
+  const [undoTask, setUndoTask] = useState<{ label: string; execute: () => Promise<void>; timeLeft: number } | null>(null);
   const [teams, setTeams] = useState<(Team & { members: UserProfile[] })[]>([]);
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    adminCount: 0,
+    studentCount: 0,
+    activeUsers: 0,
+    totalResponses: 0
+  });
+
+  useEffect(() => {
+    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      const users = snapshot.docs.map(doc => doc.data() as UserProfile);
+      setStats(prev => ({
+        ...prev,
+        totalUsers: users.length,
+        adminCount: users.filter(u => u.role === 'admin').length,
+        studentCount: users.filter(u => u.role === 'student').length,
+        activeUsers: users.filter(u => u.totalScore > 0).length
+      }));
+    });
+
+    const unsubscribeResponses = onSnapshot(collection(db, 'responses'), (snapshot) => {
+      setStats(prev => ({
+        ...prev,
+        totalResponses: snapshot.size
+      }));
+    });
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeResponses();
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribeTeams = onSnapshot(collection(db, 'teams'), async (snapshot) => {
       const teamsData = snapshot.docs.map(doc => doc.data() as Team);
       const teamsWithMembers = await Promise.all(teamsData.map(async (team) => {
-        const membersSnap = await getDocs(query(collection(db, 'users'), where('teamId', '==', team.id)));
-        return { ...team, members: membersSnap.docs.map(d => d.data() as UserProfile) };
+        const members = await Promise.all((team.memberUids || []).map(async (uid) => {
+          const userDoc = await getDoc(doc(db, 'users', uid));
+          return userDoc.data() as UserProfile;
+        }));
+        return { ...team, members: members.filter(m => !!m) };
       }));
       setTeams(teamsWithMembers);
     });
@@ -561,6 +723,24 @@ const AdminDashboard = () => {
       return () => clearTimeout(timer);
     }
   }, [adminMessage]);
+
+  useEffect(() => {
+    if (!undoTask) return;
+    if (undoTask.timeLeft <= 0) {
+      undoTask.execute();
+      setUndoTask(null);
+      return;
+    }
+    const timer = setInterval(() => {
+      setUndoTask(prev => prev ? { ...prev, timeLeft: prev.timeLeft - 1 } : null);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [undoTask]);
+
+  const scheduleTask = (label: string, execute: () => Promise<void>) => {
+    if (undoTask) undoTask.execute();
+    setUndoTask({ label, execute, timeLeft: 10 });
+  };
 
   useEffect(() => {
     const path = 'questions';
@@ -628,6 +808,48 @@ const AdminDashboard = () => {
     }
   };
 
+  const clearQuestions = async (round?: number) => {
+    const execute = async () => {
+      try {
+        const q = round 
+          ? query(collection(db, 'questions'), where('round', '==', round))
+          : query(collection(db, 'questions'));
+        const snap = await getDocs(q);
+        const batch = writeBatch(db);
+        snap.docs.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+        setAdminMessage({ text: round ? `Round ${round} questions cleared` : "All questions cleared", type: 'info' });
+      } catch (error) {
+        setAdminMessage({ text: "Failed to clear questions", type: 'error' });
+      }
+    };
+
+    scheduleTask(round ? `Clear Round ${round}` : "Clear All Questions", execute);
+    setPendingAction(null);
+  };
+
+  const removeAllParticipants = async () => {
+    const execute = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
+        const batch = writeBatch(db);
+        snap.docs.forEach(d => batch.delete(d.ref));
+        
+        // Also clear teams as they refer to users
+        const teamsSnap = await getDocs(collection(db, 'teams'));
+        teamsSnap.docs.forEach(d => batch.delete(d.ref));
+
+        await batch.commit();
+        setAdminMessage({ text: "All participants and teams removed", type: 'info' });
+      } catch (error) {
+        setAdminMessage({ text: "Failed to remove participants", type: 'error' });
+      }
+    };
+
+    scheduleTask("Remove All Participants", execute);
+    setPendingAction(null);
+  };
+
   const deleteQuestion = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'questions', id));
@@ -640,6 +862,15 @@ const AdminDashboard = () => {
   };
 
   const transitionToRound2 = async () => {
+    // 1. Clear existing team assignments from all users
+    const usersWithTeamsSnap = await getDocs(query(collection(db, 'users'), where('teamId', '!=', null)));
+    const clearBatch = writeBatch(db);
+    usersWithTeamsSnap.docs.forEach(d => {
+      clearBatch.update(d.ref, { teamId: null });
+    });
+    await clearBatch.commit();
+
+    // 2. Get new top 16
     const usersSnap = await getDocs(query(collection(db, 'users'), orderBy('totalScore', 'desc'), limit(16)));
     const topUsers = usersSnap.docs.map(d => d.data() as UserProfile);
     
@@ -697,6 +928,29 @@ const AdminDashboard = () => {
       )}
 
       <AnimatePresence>
+        {undoTask && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+            animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
+            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+            className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-between"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-black text-xs">
+                {undoTask.timeLeft}
+              </div>
+              <p className="text-sm font-bold text-amber-400">
+                {undoTask.label} in {undoTask.timeLeft}s...
+              </p>
+            </div>
+            <button 
+              onClick={() => setUndoTask(null)}
+              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+            >
+              Undo
+            </button>
+          </motion.div>
+        )}
         {adminMessage && (
           <motion.div 
             initial={{ opacity: 0, y: -20 }}
@@ -711,6 +965,32 @@ const AdminDashboard = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+        {[
+          { label: 'Total Logins', value: stats.totalUsers, icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+          { label: 'Admins', value: stats.adminCount, icon: ShieldCheck, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+          { label: 'Students', value: stats.studentCount, icon: UserIcon, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
+          { label: 'Active Now', value: stats.activeUsers, icon: Activity, color: 'text-green-400', bg: 'bg-green-500/10' },
+          { label: 'Responses', value: stats.totalResponses, icon: BarChart3, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+        ].map((stat, i) => (
+          <motion.div 
+            key={stat.label}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.1 }}
+            className="p-4 bg-white/5 border border-white/10 rounded-2xl space-y-2"
+          >
+            <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", stat.bg)}>
+              <stat.icon className={cn("w-4 h-4", stat.color)} />
+            </div>
+            <div>
+              <p className="text-2xl font-black text-white">{stat.value}</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{stat.label}</p>
+            </div>
+          </motion.div>
+        ))}
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-2 space-y-6">
@@ -891,12 +1171,73 @@ const AdminDashboard = () => {
                         </div>
                       </div>
                     ) : (
-                      <button 
-                        onClick={() => setConfirmReset(true)}
-                        className="w-full py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 rounded-lg font-bold text-sm transition-all"
-                      >
-                        Reset Game State
-                      </button>
+                      <div className="space-y-3">
+                        <button 
+                          onClick={() => setConfirmReset(true)}
+                          className="w-full py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 rounded-lg font-bold text-sm transition-all"
+                        >
+                          Reset Game State & Scores
+                        </button>
+                        
+                        <div className="h-px bg-red-500/20 my-2" />
+                        
+                        <p className="text-[10px] font-black text-red-500/50 uppercase tracking-widest px-1">Specific Resets</p>
+                        
+                        <div className="grid grid-cols-1 gap-2">
+                          {pendingAction === 'remove_participants' ? (
+                            <div className="p-3 bg-red-600/10 border border-red-500/20 rounded-xl space-y-3">
+                              <p className="text-[10px] font-bold text-red-400 text-center">Delete all students and teams?</p>
+                              <div className="flex gap-2">
+                                <button onClick={removeAllParticipants} className="flex-1 py-1 bg-red-600 text-white rounded-lg text-[10px] font-bold">Confirm</button>
+                                <button onClick={() => setPendingAction(null)} className="flex-1 py-1 bg-white/10 text-white rounded-lg text-[10px] font-bold">Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button 
+                              onClick={() => setPendingAction('remove_participants')}
+                              className="w-full py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2"
+                            >
+                              <Users className="w-3 h-3" /> Remove All Participants
+                            </button>
+                          )}
+                          
+                          <div className="grid grid-cols-2 gap-2">
+                            {pendingAction === 'clear_q1' ? (
+                              <div className="p-2 bg-red-600/10 border border-red-500/20 rounded-xl space-y-2">
+                                <p className="text-[9px] font-bold text-red-400 text-center leading-none">Clear R1?</p>
+                                <div className="flex gap-1">
+                                  <button onClick={() => clearQuestions(1)} className="flex-1 py-1 bg-red-600 text-white rounded-md text-[9px] font-bold">Yes</button>
+                                  <button onClick={() => setPendingAction(null)} className="flex-1 py-1 bg-white/10 text-white rounded-md text-[9px] font-bold">No</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button 
+                                onClick={() => setPendingAction('clear_q1')}
+                                className="py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2"
+                              >
+                                <XCircle className="w-3 h-3" /> Clear Round 1
+                              </button>
+                            )}
+                            
+                            {pendingAction === 'clear_q2' ? (
+                              <div className="p-2 bg-red-600/10 border border-red-500/20 rounded-xl space-y-2">
+                                <p className="text-[9px] font-bold text-red-400 text-center leading-none">Clear R2?</p>
+                                <div className="flex gap-1">
+                                  <button onClick={() => clearQuestions(2)} className="flex-1 py-1 bg-red-600 text-white rounded-md text-[9px] font-bold">Yes</button>
+                                  <button onClick={() => setPendingAction(null)} className="flex-1 py-1 bg-white/10 text-white rounded-md text-[9px] font-bold">No</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button 
+                                onClick={() => setPendingAction('clear_q2')}
+                                className="py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2"
+                              >
+                                <XCircle className="w-3 h-3" /> Clear Round 2
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </motion.div>
@@ -927,8 +1268,11 @@ const StudentView = () => {
           setTeam(teamData);
           
           // Fetch member profiles
-          const membersSnap = await getDocs(query(collection(db, 'users'), where('teamId', '==', profile.teamId)));
-          setTeamMembers(membersSnap.docs.map(d => d.data() as UserProfile));
+          const members = await Promise.all((teamData.memberUids || []).map(async (uid) => {
+            const userDoc = await getDoc(doc(db, 'users', uid));
+            return userDoc.data() as UserProfile;
+          }));
+          setTeamMembers(members.filter(m => !!m));
         }
       });
       return () => unsubscribeTeam();
@@ -1006,7 +1350,19 @@ const StudentView = () => {
     setHasAnswered(true);
 
     const isCorrect = index === currentQuestion.correctIndex;
+    const isTeamMember = gameState.round === 2 && profile.teamId;
+    const isAudience = gameState.round === 2 && !profile.teamId;
+    
+    // Only team members get points in Round 2. Everyone gets points in Round 1.
     const points = isCorrect ? Math.floor(currentQuestion.points * (timeLeft / currentQuestion.duration)) : 0;
+    
+    // Deduction logic for Round 2
+    let finalPoints = points;
+    if (!isCorrect && gameState.round === 2 && isTeamMember) {
+      finalPoints = -Math.floor(currentQuestion.points / 2); // Deduct half base points for wrong answer
+    }
+
+    const pointsToAward = isAudience ? 0 : finalPoints;
 
     const path = `responses/${profile.uid}_${currentQuestion.id}`;
     try {
@@ -1015,23 +1371,24 @@ const StudentView = () => {
         questionId: currentQuestion.id,
         selectedIndex: index,
         timeTaken: currentQuestion.duration - timeLeft,
-        pointsEarned: points,
-        timestamp: new Date().toISOString()
+        pointsEarned: pointsToAward,
+        timestamp: new Date().toISOString(),
+        isAudience: isAudience
       });
 
       // Update user total score (In production, use Cloud Functions for security)
-      if (points > 0) {
+      if (pointsToAward !== 0) {
         await setDoc(doc(db, 'users', profile.uid), {
-          totalScore: (profile.totalScore || 0) + points
+          totalScore: (profile.totalScore || 0) + pointsToAward
         }, { merge: true });
 
-        // Update team score if in Round 2
-        if (profile.teamId) {
+        // Update team score if in Round 2 and is a team member
+        if (isTeamMember) {
           const teamRef = doc(db, 'teams', profile.teamId);
           const teamDoc = await getDoc(teamRef);
           if (teamDoc.exists()) {
             await updateDoc(teamRef, {
-              totalScore: (teamDoc.data().totalScore || 0) + points
+              totalScore: (teamDoc.data().totalScore || 0) + pointsToAward
             });
           }
         }

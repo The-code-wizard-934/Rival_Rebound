@@ -18,7 +18,7 @@ service cloud.firestore {
     
     // Collection: responses
     // Document ID: {userId}_{questionId}
-    // Fields: userId, questionId, selectedIndex, timeTaken, pointsEarned, timestamp
+    // Fields: userId, questionId, selectedIndex, timeTaken, pointsEarned, timestamp, isAudience
     
     // Collection: teams
     // Document ID: {id}

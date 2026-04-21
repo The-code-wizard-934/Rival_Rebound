@@ -51,7 +51,8 @@
         "selectedIndex": { "type": "number" },
         "timeTaken": { "type": "number" },
         "pointsEarned": { "type": "number" },
-        "timestamp": { "type": "string", "format": "date-time" }
+        "timestamp": { "type": "string", "format": "date-time" },
+        "isAudience": { "type": "boolean" }
       }
     },
     "Team": {
