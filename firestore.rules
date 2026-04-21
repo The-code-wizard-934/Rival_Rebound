@@ -77,7 +77,12 @@ service cloud.firestore {
 
     match /teams/{id} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        request.auth.uid in resource.data.memberUids && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['totalScore'])
+      );
     }
   }
 }
