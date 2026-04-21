@@ -30,42 +30,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log("Auth state changed:", firebaseUser?.email);
       if (firebaseUser) {
         setUser(firebaseUser);
-        // Fetch or create profile
-        const userDocRef = doc(db, 'users', firebaseUser.uid);
-        try {
-          console.log("Fetching profile for:", firebaseUser.uid);
-          const userDoc = await getDoc(userDocRef);
-          
-          if (userDoc.exists()) {
-            console.log("Profile found:", userDoc.data());
-            setProfile(userDoc.data() as UserProfile);
-          } else {
-            console.log("Creating new profile...");
-            const newProfile: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              displayName: firebaseUser.displayName || 'Anonymous',
-              photoURL: firebaseUser.photoURL || '',
-              role: firebaseUser.email === 'yashbose35@gmail.com' ? 'admin' : 'student',
-              totalScore: 0,
-            };
-            await setDoc(userDocRef, newProfile);
-            setProfile(newProfile);
-          }
-        } catch (error) {
-          console.error("Profile fetch error:", error);
-          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
-        }
+        // We will subscribe to the profile in another useEffect
       } else {
         setUser(null);
         setProfile(null);
         setGameState(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribeAuth();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    console.log("Subscribing to profile for:", user.uid);
+    const userDocRef = doc(db, 'users', user.uid);
+    
+    const unsubscribeProfile = onSnapshot(userDocRef, async (userDoc) => {
+      if (userDoc.exists()) {
+        console.log("Profile update:", userDoc.data());
+        setProfile(userDoc.data() as UserProfile);
+      } else {
+        console.log("Creating new profile...");
+        const newProfile: UserProfile = {
+          uid: user.uid,
+          email: user.email || '',
+          displayName: user.displayName || 'Anonymous',
+          photoURL: user.photoURL || '',
+          role: user.email === 'yashbose35@gmail.com' ? 'admin' : 'student',
+          totalScore: 0,
+        };
+        try {
+          await setDoc(userDocRef, newProfile);
+          // Initial set will trigger another snapshot
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+        }
+      }
+      setLoading(false);
+    }, (error) => {
+      console.error("Profile subscription error:", error);
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+      setLoading(false);
+    });
+
+    return () => unsubscribeProfile();
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;

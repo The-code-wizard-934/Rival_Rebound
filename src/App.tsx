@@ -3,7 +3,7 @@ import { useAuth } from './AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, Users, Play, LogOut, ShieldCheck, User as UserIcon, Timer, Music, Image as ImageIcon, CheckCircle2, XCircle, Maximize, Minimize, AlertTriangle, ChevronDown, ChevronUp, Activity, BarChart3, Volume2, VolumeX, Pause, RotateCcw } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { doc, getDoc, getDocs, collection, query, orderBy, limit, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch, where } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, query, orderBy, limit, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch, where, increment } from 'firebase/firestore';
 import { GameState, Question, UserProfile, Team } from './types';
 import { seedDatabase } from './seed';
 import { cn } from './lib/utils';
@@ -1376,21 +1376,17 @@ const StudentView = () => {
         isAudience: isAudience
       });
 
-      // Update user total score (In production, use Cloud Functions for security)
+      // Update user total score
       if (pointsToAward !== 0) {
-        await setDoc(doc(db, 'users', profile.uid), {
-          totalScore: (profile.totalScore || 0) + pointsToAward
-        }, { merge: true });
+        await updateDoc(doc(db, 'users', profile.uid), {
+          totalScore: increment(pointsToAward)
+        });
 
         // Update team score if in Round 2 and is a team member
-        if (isTeamMember) {
-          const teamRef = doc(db, 'teams', profile.teamId);
-          const teamDoc = await getDoc(teamRef);
-          if (teamDoc.exists()) {
-            await updateDoc(teamRef, {
-              totalScore: (teamDoc.data().totalScore || 0) + pointsToAward
-            });
-          }
+        if (isTeamMember && profile.teamId) {
+          await updateDoc(doc(db, 'teams', profile.teamId), {
+            totalScore: increment(pointsToAward)
+          });
         }
       }
     } catch (error) {
