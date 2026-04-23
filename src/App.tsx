@@ -1465,8 +1465,9 @@ const StudentView = () => {
 
     let finalPoints = points;
     if (!isCorrect && isRound2 && isTeamMember) {
-      // Penalty: deduct 1/4 of question value
-      finalPoints = -Math.floor(currentQuestion.points / 4);
+      // Penalty: deduct precisely 1/4 of question value
+      const penaltyValue = Math.floor(currentQuestion.points / 4);
+      finalPoints = -penaltyValue;
     }
 
     const userPointsToAward = isAudience ? 0 : finalPoints;
@@ -1486,32 +1487,24 @@ const StudentView = () => {
       });
 
       if (userPointsToAward !== 0) {
-        // Prevent round2Score from becoming negative
-        const currentR2 = profile.round2Score ?? 0;
-        const finalR2Increment = (currentR2 + userPointsToAward < 0) ? -currentR2 : userPointsToAward;
-
         const userUpdates: any = {
-          totalScore: increment(userPointsToAward) // Career score can be negative or we just allow it
+          totalScore: increment(userPointsToAward)
         };
         if (isRound2) {
-          userUpdates.round2Score = increment(finalR2Increment);
+          userUpdates.round2Score = increment(userPointsToAward);
         }
         batch.update(doc(db, 'users', profile.uid), userUpdates);
       }
 
-      // ✅ Team Score logic - also prevent team score from going below zero if desired
+      // Team Score: Atomically increment or decrement
       if (isTeamMember && resolvedTeamId && finalPoints !== 0) {
-        const teamSnap = await getDoc(doc(db, 'teams', resolvedTeamId));
-        const currentTeamScore = teamSnap.data()?.totalScore || 0;
-        const finalTeamIncrement = (currentTeamScore + finalPoints < 0) ? -currentTeamScore : finalPoints;
-
         batch.update(doc(db, 'teams', resolvedTeamId), {
-          totalScore: increment(finalTeamIncrement),
+          totalScore: increment(finalPoints),
         });
       }
 
       await batch.commit();
-      console.log('[handleAnswer] success — teamId used:', resolvedTeamId, 'points:', finalPoints);
+      console.log('[handleAnswer] success — penalty applied:', finalPoints);
     } catch (error) {
       console.error('[handleAnswer] Batch write failed:', error);
       handleFirestoreError(error, OperationType.WRITE, responsePath);
