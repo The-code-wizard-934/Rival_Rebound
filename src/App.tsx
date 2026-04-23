@@ -80,7 +80,7 @@ const LoginView = () => {
           <div className="w-20 h-20 bg-gradient-to-br from-cyan-500 to-purple-600 rounded-2xl mx-auto flex items-center justify-center shadow-2xl shadow-cyan-500/20">
             <Trophy className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-5xl font-black tracking-tighter text-white">RIVAL REBOUND</h1>
+          <h1 className="text-5xl font-black tracking-tighter text-white">TECH TRIVIA</h1>
           <p className="text-gray-400 text-lg">The ultimate real-time auditorium quiz experience.</p>
         </div>
         
@@ -655,7 +655,7 @@ const AuditoriumDisplay = () => {
             <div className="w-48 h-48 bg-gradient-to-br from-cyan-500 to-purple-600 rounded-[40px] mx-auto flex items-center justify-center shadow-2xl shadow-cyan-500/20 animate-bounce">
               <Trophy className="w-24 h-24 text-white" />
             </div>
-            <h1 className="text-8xl font-black tracking-tighter">RIVAL REBOUND</h1>
+            <h1 className="text-8xl font-black tracking-tighter">TECH TRIVIA</h1>
             <p className="text-3xl text-gray-400 font-medium">GET READY TO COMPETE</p>
           </motion.div>
         )}
@@ -902,13 +902,12 @@ const AdminDashboard = () => {
       const teamId = `team_${i + 1}`;
       const members = shuffled.slice(i * 4, (i + 1) * 4);
       const memberUids = members.map(u => u.uid);
-      const initialTeamScore = members.reduce((acc, u) => acc + (u.totalScore || 0), 0);
       
       teamsBatch.set(doc(db, 'teams', teamId), { 
         id: teamId, 
         name: teamNames[i], 
         memberUids, 
-        totalScore: initialTeamScore 
+        totalScore: 0 
       });
       memberUids.forEach(uid => teamsBatch.update(doc(db, 'users', uid), { teamId }));
     }
@@ -1463,12 +1462,15 @@ const StudentView = () => {
                 <Users className="w-10 h-10 text-white" />
               </div>
               <h2 className="text-sm font-black text-cyan-400 uppercase tracking-widest mb-1">Your Team</h2>
-              <h1 className="text-4xl font-black text-white mb-2">{team.name}</h1>
-              
-              <div className="mb-6 flex flex-col items-center">
-                <div className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-1">Team Total Score</div>
-                <div className="text-5xl font-black text-white tabular-nums tracking-tighter">
-                  {teamMembers.reduce((acc, m) => acc + (m.totalScore || 0), 0)}
+              <h1 className="text-4xl font-black text-white mb-6 uppercase tracking-tight">{team.name}</h1>
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="p-4 bg-white/5 border border-white/10 rounded-2xl text-center">
+                  <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Your Score</div>
+                  <div className="text-2xl font-black text-white">{profile.totalScore}</div>
+                </div>
+                <div className="p-4 bg-white/5 border border-white/10 rounded-2xl text-center">
+                  <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest mb-1">Team Score</div>
+                  <div className="text-2xl font-black text-white">{team.totalScore || 0}</div>
                 </div>
               </div>
 
