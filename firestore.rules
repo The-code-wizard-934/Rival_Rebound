@@ -36,11 +36,10 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && (
-        request.auth.token.email == "yashbose35@gmail.com" || 
+      return isAuthenticated() && 
+        (request.auth.token.email == "yashbose35@gmail.com" && request.auth.token.email_verified == true) || 
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
-      );
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
     }
 
     function incoming() {
@@ -63,7 +62,7 @@ service cloud.firestore {
              data.userId == request.auth.uid &&
              data.questionId is string &&
              data.selectedIndex is int &&
-             data.timestamp is timestamp;
+             (data.timestamp is string || data.timestamp is timestamp);
     }
 
     // ===============================================================
@@ -76,9 +75,15 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow get: if isAuthenticated();
-      allow list: if isAdmin();
+      allow list: if isAuthenticated(); // Leaderboard needs this
       allow create: if isOwner(uid) && isValidUser(incoming()) && (incoming().role == 'student' || isAdmin());
-      allow update: if isAdmin() || (isOwner(uid) && incoming().role == existing().role);
+      allow update: if isValidUser(incoming()) && (
+        isAdmin() || (
+          isOwner(uid) && 
+          incoming().role == existing().role &&
+          incoming().get('teamId', null) == existing().get('teamId', null)
+        )
+      );
       allow delete: if isAdmin();
     }
 

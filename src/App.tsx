@@ -1513,13 +1513,21 @@ const StudentView = () => {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center space-y-8">
         {!team ? (
-          <>
-            <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-6 animate-pulse">
-              <Timer className="w-10 h-10 text-cyan-500" />
+          <div className="w-full max-w-md space-y-8">
+            <div className="space-y-4">
+              <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mx-auto animate-pulse">
+                <Timer className="w-10 h-10 text-cyan-500" />
+              </div>
+              <h2 className="text-3xl font-bold text-white">Waiting for Host</h2>
+              <p className="text-gray-400">The quiz will begin shortly. Stay tuned!</p>
             </div>
-            <h2 className="text-3xl font-bold text-white mb-2">Waiting for Host</h2>
-            <p className="text-gray-400">The quiz will begin shortly. Stay tuned!</p>
-          </>
+            
+            <div className="p-6 bg-white/5 border border-white/10 rounded-3xl">
+              <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Your Career Score</div>
+              <div className="text-4xl font-black text-white">{profile.totalScore}</div>
+              <p className="text-[10px] text-gray-600 mt-2 uppercase font-bold tracking-tight">Total across all rounds</p>
+            </div>
+          </div>
         ) : (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -1532,14 +1540,24 @@ const StudentView = () => {
               </div>
               <h2 className="text-sm font-black text-cyan-400 uppercase tracking-widest mb-1">Your Team</h2>
               <h1 className="text-4xl font-black text-white mb-6 uppercase tracking-tight">{team.name}</h1>
+              
+              <div className="grid grid-cols-1 gap-4 mb-6">
+                 <div className="p-4 bg-white/5 border border-white/10 rounded-2xl text-center">
+                    <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest mb-1">Team Score</div>
+                    <div className="text-3xl font-black text-white">{team.totalScore || 0}</div>
+                 </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="p-4 bg-white/5 border border-white/10 rounded-2xl text-center">
-                  <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Your Contribution</div>
+                  <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Team Contribution</div>
                   <div className="text-2xl font-black text-white">{profile.round2Score ?? 0}</div>
+                  <p className="text-[8px] text-gray-600 uppercase font-black mt-1">Round 2 only</p>
                 </div>
                 <div className="p-4 bg-white/5 border border-white/10 rounded-2xl text-center">
-                  <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest mb-1">Team Score</div>
-                  <div className="text-2xl font-black text-white">{team.totalScore || 0}</div>
+                  <div className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">Career Score</div>
+                  <div className="text-2xl font-black text-white">{profile.totalScore}</div>
+                  <p className="text-[8px] text-gray-600 uppercase font-black mt-1">Total R1 + R2</p>
                 </div>
               </div>
 
@@ -1659,6 +1677,30 @@ const StudentView = () => {
             })}
           </div>
         </div>
+
+        {/* Floating Stats Bar */}
+        <div className="fixed bottom-6 left-6 right-6 flex justify-center z-40 pointer-events-none">
+          <div className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl px-6 py-3 flex items-center gap-6 md:gap-8 shadow-2xl pointer-events-auto">
+            <div className="text-center group">
+              <p className="text-[8px] font-black text-amber-500 uppercase tracking-widest leading-none mb-1 opacity-70 group-hover:opacity-100 transition-opacity">Career Score</p>
+              <p className="text-lg font-black text-white leading-none">{profile.totalScore}</p>
+            </div>
+            {team && (
+              <>
+                <div className="w-px h-6 bg-white/10" />
+                <div className="text-center group">
+                  <p className="text-[8px] font-black text-cyan-400 uppercase tracking-widest leading-none mb-1 opacity-70 group-hover:opacity-100 transition-opacity">Team Score</p>
+                  <p className="text-lg font-black text-white leading-none">{team.totalScore || 0}</p>
+                </div>
+                <div className="w-px h-6 bg-white/10" />
+                <div className="text-center group">
+                  <p className="text-[8px] font-black text-gray-500 uppercase tracking-widest leading-none mb-1 opacity-70 group-hover:opacity-100 transition-opacity">Contribution</p>
+                  <p className="text-lg font-black text-white leading-none">{profile.round2Score ?? 0}</p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -1669,9 +1711,17 @@ const StudentView = () => {
         <Trophy className="w-16 h-16 text-amber-500 mb-6" />
         <h2 className="text-3xl font-bold text-white mb-2">Check the Big Screen!</h2>
         <p className="text-gray-400 mb-8">Leaderboard is being revealed in the auditorium.</p>
-        <div className="p-6 bg-white/5 rounded-2xl border border-white/10 w-full max-w-xs">
-          <p className="text-sm text-gray-500 uppercase font-bold mb-1">Your Score</p>
-          <p className="text-4xl font-black text-white">{profile?.totalScore}</p>
+        <div className="grid grid-cols-1 gap-4 w-full max-w-sm">
+          <div className="p-6 bg-white/5 rounded-2xl border border-white/10">
+            <p className="text-[10px] text-amber-500 uppercase font-black tracking-widest mb-1">Career Score (R1+R2)</p>
+            <p className="text-4xl font-black text-white">{profile.totalScore}</p>
+          </div>
+          {team && (
+            <div className="p-6 bg-cyan-500/10 rounded-2xl border border-cyan-500/20">
+              <p className="text-[10px] text-cyan-400 uppercase font-black tracking-widest mb-1">Team Contribution (R2)</p>
+              <p className="text-4xl font-black text-white">{profile.round2Score ?? 0}</p>
+            </div>
+          )}
         </div>
       </div>
     );
