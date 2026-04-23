@@ -34,7 +34,7 @@ const Navbar = () => {
         <div className="w-8 h-8 bg-gradient-to-br from-cyan-500 to-purple-600 rounded-lg flex items-center justify-center">
           <Trophy className="w-5 h-5 text-white" />
         </div>
-        <span className="text-xl font-bold tracking-tighter text-white">RIVAL REBOUND</span>
+        <span className="text-xl font-bold tracking-tighter text-white">TECH TRIVIA</span>
       </div>
       <div className="flex items-center gap-4">
         {profile && (
@@ -674,6 +674,7 @@ const AdminDashboard = () => {
   const [confirmReset, setConfirmReset] = useState(false);
   const [pendingAction, setPendingAction] = useState<'remove_participants' | 'clear_q1' | 'clear_q2' | null>(null);
   const [undoTask, setUndoTask] = useState<{ label: string; execute: () => Promise<void>; timeLeft: number } | null>(null);
+  const [activeRoundTab, setActiveRoundTab] = useState<number>(1);
   const [teams, setTeams] = useState<(Team & { members: UserProfile[] })[]>([]);
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -750,9 +751,20 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     const path = 'questions';
-    const q = query(collection(db, path), orderBy('id'));
+    // Remove Firestore ordering and handle it in-memory for natural numeric sorting
+    const q = query(collection(db, path));
     return onSnapshot(q, (snapshot) => {
-      setQuestions(snapshot.docs.map(doc => doc.data() as Question));
+      const qs = snapshot.docs.map(doc => doc.data() as Question);
+      // Sort numerically by ID
+      qs.sort((a, b) => {
+        const idA = parseInt(a.id);
+        const idB = parseInt(b.id);
+        if (!isNaN(idA) && !isNaN(idB)) {
+          return idA - idB;
+        }
+        return a.id.localeCompare(b.id);
+      });
+      setQuestions(qs);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
@@ -868,50 +880,48 @@ const AdminDashboard = () => {
   };
 
   const transitionToRound2 = async () => {
-    // 1. Clear existing team assignments from all users
+    // Step 1: Clear old teamIds
     const usersWithTeamsSnap = await getDocs(query(collection(db, 'users'), where('teamId', '!=', null)));
     const clearBatch = writeBatch(db);
-    usersWithTeamsSnap.docs.forEach(d => {
-      clearBatch.update(d.ref, { teamId: null });
-    });
+    usersWithTeamsSnap.docs.forEach(d => clearBatch.update(d.ref, { teamId: null }));
     await clearBatch.commit();
 
-    // 2. Get new top 16
+    // Step 2: Get top 16 and form teams
     const usersSnap = await getDocs(query(collection(db, 'users'), orderBy('totalScore', 'desc'), limit(16)));
     const topUsers = usersSnap.docs.map(d => d.data() as UserProfile);
-    
     if (topUsers.length < 16) {
       setAdminMessage({ text: "Need at least 16 students to form 4 teams!", type: 'error' });
       return;
     }
 
-    const batch = writeBatch(db);
     const shuffled = [...topUsers].sort(() => Math.random() - 0.5);
     const teamNames = ["CYBER KNIGHTS", "NEON NINJAS", "PIXEL PREDATORS", "CODE CRUSHERS"];
-    
+
+    const teamsBatch = writeBatch(db);
     for (let i = 0; i < 4; i++) {
       const teamId = `team_${i + 1}`;
-      const memberUids = shuffled.slice(i * 4, (i + 1) * 4).map(u => u.uid);
+      const members = shuffled.slice(i * 4, (i + 1) * 4);
+      const memberUids = members.map(u => u.uid);
+      const initialTeamScore = members.reduce((acc, u) => acc + (u.totalScore || 0), 0);
       
-      batch.set(doc(db, 'teams', teamId), {
-        id: teamId,
-        name: teamNames[i],
-        memberUids,
-        totalScore: 0
+      teamsBatch.set(doc(db, 'teams', teamId), { 
+        id: teamId, 
+        name: teamNames[i], 
+        memberUids, 
+        totalScore: initialTeamScore 
       });
-
-      memberUids.forEach(uid => {
-        batch.update(doc(db, 'users', uid), { teamId });
-      });
+      memberUids.forEach(uid => teamsBatch.update(doc(db, 'users', uid), { teamId }));
     }
+    await teamsBatch.commit(); // ✅ teamIds land on students FIRST
 
-    batch.update(doc(db, 'game_state', 'current'), {
+    // Step 3: ONLY NOW update game_state — gives profile snapshots time to fire
+    await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5s buffer for listeners
+    await setDoc(doc(db, 'game_state', 'current'), {
       status: 'round_transition',
       round: 2,
       currentQuestionId: null
-    });
+    }, { merge: true });
 
-    await batch.commit();
     setAdminMessage({ text: "Round 2 Teams Formed!", type: 'info' });
   };
 
@@ -1007,74 +1017,81 @@ const AdminDashboard = () => {
           />
           
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-            <h3 className="text-xl font-bold text-white mb-6">Quiz Flow</h3>
-            
-            {[1, 2].map((roundNum) => (
-              <div key={roundNum} className="mb-8 last:mb-0">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="px-3 py-1 bg-cyan-500/20 border border-cyan-500/30 rounded-full text-[10px] font-black text-cyan-400 uppercase tracking-widest">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-white">Quiz Flow</h3>
+              <div className="flex bg-white/5 p-1 rounded-xl border border-white/10">
+                {[1, 2].map((roundNum) => (
+                  <button
+                    key={roundNum}
+                    onClick={() => setActiveRoundTab(roundNum)}
+                    className={cn(
+                      "px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all",
+                      activeRoundTab === roundNum 
+                        ? "bg-cyan-600 text-white shadow-lg shadow-cyan-500/20" 
+                        : "text-gray-500 hover:text-white"
+                    )}
+                  >
                     Round {roundNum}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+              {questions.filter(q => (q.round || 1) === activeRoundTab).map((q) => (
+                <div key={q.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5 hover:border-white/20 transition-all">
+                  <div>
+                    <p className="text-xs text-gray-500 font-mono mb-1">Q{q.id} • {q.type.toUpperCase()} • {q.points}pts</p>
+                    <p className="text-white font-medium">{q.text}</p>
                   </div>
-                  <div className="h-px flex-1 bg-white/10" />
-                </div>
-                
-                <div className="space-y-4">
-                  {questions.filter(q => (q.round || 1) === roundNum).map((q) => (
-                    <div key={q.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5 hover:border-white/20 transition-all">
-                      <div>
-                        <p className="text-xs text-gray-500 font-mono mb-1">Q{q.id} • {q.type.toUpperCase()} • {q.points}pts</p>
-                        <p className="text-white font-medium">{q.text}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {deletingId === q.id ? (
-                          <div className="flex items-center gap-2 bg-red-500/10 p-1 rounded-lg border border-red-500/20">
-                            <button 
-                              onClick={() => deleteQuestion(q.id)}
-                              className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-xs rounded-md font-bold"
-                            >
-                              Confirm
-                            </button>
-                            <button 
-                              onClick={() => setDeletingId(null)}
-                              className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white text-xs rounded-md"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <button 
-                              onClick={() => setEditingQuestion(q)}
-                              className="p-2 text-gray-400 hover:text-white transition-colors"
-                              title="Edit"
-                            >
-                              <ImageIcon className="w-4 h-4" />
-                            </button>
-                            <button 
-                              onClick={() => setDeletingId(q.id)}
-                              className="p-2 text-gray-400 hover:text-red-500 transition-colors"
-                              title="Delete"
-                            >
-                              <XCircle className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
+                  <div className="flex items-center gap-2">
+                    {deletingId === q.id ? (
+                      <div className="flex items-center gap-2 bg-red-500/10 p-1 rounded-lg border border-red-500/20">
                         <button 
-                          onClick={() => startQuestion(q.id)}
-                          disabled={gameState?.currentQuestionId === q.id && gameState?.status === 'question_active'}
-                          className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all flex items-center gap-2"
+                          onClick={() => deleteQuestion(q.id)}
+                          className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-xs rounded-md font-bold"
                         >
-                          <Play className="w-4 h-4 fill-current" /> Launch
+                          Confirm
+                        </button>
+                        <button 
+                          onClick={() => setDeletingId(null)}
+                          className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white text-xs rounded-md"
+                        >
+                          Cancel
                         </button>
                       </div>
-                    </div>
-                  ))}
-                  {questions.filter(q => (q.round || 1) === roundNum).length === 0 && (
-                    <p className="text-sm text-gray-500 italic text-center py-4">No questions added for Round {roundNum}</p>
-                  )}
+                    ) : (
+                      <>
+                        <button 
+                          onClick={() => setEditingQuestion(q)}
+                          className="p-2 text-gray-400 hover:text-white transition-colors"
+                          title="Edit"
+                        >
+                          <ImageIcon className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => setDeletingId(q.id)}
+                          className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                          title="Delete"
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                    <button 
+                      onClick={() => startQuestion(q.id)}
+                      disabled={gameState?.currentQuestionId === q.id && gameState?.status === 'question_active'}
+                      className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all flex items-center gap-2"
+                    >
+                      <Play className="w-4 h-4 fill-current" /> Launch
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+              {questions.filter(q => (q.round || 1) === activeRoundTab).length === 0 && (
+                <p className="text-sm text-gray-500 italic text-center py-4">No questions added for Round {activeRoundTab}</p>
+              )}
+            </div>
           </div>
 
           {teams.length > 0 && (
@@ -1268,20 +1285,23 @@ const StudentView = () => {
   useEffect(() => {
     if (profile?.teamId) {
       const teamRef = doc(db, 'teams', profile.teamId);
-      const unsubscribeTeam = onSnapshot(teamRef, async (snapshot) => {
+      const unsubscribeTeam = onSnapshot(teamRef, (snapshot) => {
         if (snapshot.exists()) {
-          const teamData = snapshot.data() as Team;
-          setTeam(teamData);
-          
-          // Fetch member profiles
-          const members = await Promise.all((teamData.memberUids || []).map(async (uid) => {
-            const userDoc = await getDoc(doc(db, 'users', uid));
-            return userDoc.data() as UserProfile;
-          }));
-          setTeamMembers(members.filter(m => !!m));
+          setTeam(snapshot.data() as Team);
         }
       });
-      return () => unsubscribeTeam();
+
+      // Subscribe to all members of this team for real-time score updates
+      const q = query(collection(db, 'users'), where('teamId', '==', profile.teamId));
+      const unsubscribeMembers = onSnapshot(q, (snapshot) => {
+        const members = snapshot.docs.map(doc => doc.data() as UserProfile);
+        setTeamMembers(members);
+      });
+
+      return () => {
+        unsubscribeTeam();
+        unsubscribeMembers();
+      };
     } else {
       setTeam(null);
       setTeamMembers([]);
@@ -1351,52 +1371,73 @@ const StudentView = () => {
 
   const handleAnswer = async (index: number) => {
     if (hasAnswered || timeLeft === 0 || !currentQuestion || !profile) return;
-    
+
     setSelectedOption(index);
     setHasAnswered(true);
 
     const isCorrect = index === currentQuestion.correctIndex;
-    const isTeamMember = gameState.round === 2 && profile.teamId;
-    const isAudience = gameState.round === 2 && !profile.teamId;
-    
-    // Only team members get points in Round 2. Everyone gets points in Round 1.
-    const points = isCorrect ? Math.floor(currentQuestion.points * (timeLeft / currentQuestion.duration)) : 0;
-    
-    // Deduction logic for Round 2
-    let finalPoints = points;
-    if (!isCorrect && gameState.round === 2 && isTeamMember) {
-      finalPoints = -Math.floor(currentQuestion.points / 2); // Deduct half base points for wrong answer
+    const isRound2 = Number(gameState?.round) === 2;
+
+    // ✅ THE FIX: Don't trust profile.teamId from stale React state.
+    // Resolve team membership fresh from Firestore at answer time.
+    let resolvedTeamId: string | null = profile.teamId || null;
+
+    if (isRound2 && !resolvedTeamId) {
+      // profile.teamId may not have arrived yet — query directly
+      try {
+        const freshProfile = await getDoc(doc(db, 'users', profile.uid));
+        resolvedTeamId = freshProfile.data()?.teamId || null;
+      } catch (e) {
+        console.error('[handleAnswer] Failed to fetch fresh profile:', e);
+      }
     }
 
-    const pointsToAward = isAudience ? 0 : finalPoints;
+    const isTeamMember = isRound2 && !!resolvedTeamId;
+    const isAudience = isRound2 && !resolvedTeamId;
 
-    const path = `responses/${profile.uid}_${currentQuestion.id}`;
+    const points = isCorrect
+      ? Math.floor(currentQuestion.points * (timeLeft / currentQuestion.duration))
+      : 0;
+
+    let finalPoints = points;
+    if (!isCorrect && isRound2 && isTeamMember) {
+      finalPoints = -Math.floor(currentQuestion.points / 2);
+    }
+
+    const userPointsToAward = isAudience ? 0 : finalPoints;
+
+    const responsePath = `responses/${profile.uid}_${currentQuestion.id}`;
     try {
-      await setDoc(doc(db, 'responses', `${profile.uid}_${currentQuestion.id}`), {
+      const batch = writeBatch(db);
+
+      batch.set(doc(db, 'responses', `${profile.uid}_${currentQuestion.id}`), {
         userId: profile.uid,
         questionId: currentQuestion.id,
         selectedIndex: index,
         timeTaken: currentQuestion.duration - timeLeft,
-        pointsEarned: pointsToAward,
+        pointsEarned: userPointsToAward,
         timestamp: new Date().toISOString(),
-        isAudience: isAudience
+        isAudience,
       });
 
-      // Update user total score
-      if (pointsToAward !== 0) {
-        await updateDoc(doc(db, 'users', profile.uid), {
-          totalScore: increment(pointsToAward)
+      if (userPointsToAward !== 0) {
+        batch.update(doc(db, 'users', profile.uid), {
+          totalScore: increment(userPointsToAward),
         });
-
-        // Update team score if in Round 2 and is a team member
-        if (isTeamMember && profile.teamId) {
-          await updateDoc(doc(db, 'teams', profile.teamId), {
-            totalScore: increment(pointsToAward)
-          });
-        }
       }
+
+      // ✅ Uses resolvedTeamId, NOT profile.teamId
+      if (isTeamMember && resolvedTeamId && finalPoints !== 0) {
+        batch.update(doc(db, 'teams', resolvedTeamId), {
+          totalScore: increment(finalPoints),
+        });
+      }
+
+      await batch.commit();
+      console.log('[handleAnswer] success — teamId used:', resolvedTeamId, 'points:', finalPoints);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      console.error('[handleAnswer] Batch write failed:', error);
+      handleFirestoreError(error, OperationType.WRITE, responsePath);
     }
   };
 
@@ -1422,8 +1463,15 @@ const StudentView = () => {
                 <Users className="w-10 h-10 text-white" />
               </div>
               <h2 className="text-sm font-black text-cyan-400 uppercase tracking-widest mb-1">Your Team</h2>
-              <h1 className="text-4xl font-black text-white mb-6">{team.name}</h1>
+              <h1 className="text-4xl font-black text-white mb-2">{team.name}</h1>
               
+              <div className="mb-6 flex flex-col items-center">
+                <div className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-1">Team Total Score</div>
+                <div className="text-5xl font-black text-white tabular-nums tracking-tighter">
+                  {teamMembers.reduce((acc, m) => acc + (m.totalScore || 0), 0)}
+                </div>
+              </div>
+
               <div className="space-y-3 text-left">
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Team Members</p>
                 {teamMembers.map((member) => (
