@@ -5,7 +5,6 @@ import { Trophy, Users, Play, LogOut, ShieldCheck, User as UserIcon, Timer, Musi
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { doc, getDoc, getDocs, collection, query, orderBy, limit, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp, writeBatch, where, increment } from 'firebase/firestore';
 import { GameState, Question, UserProfile, Team } from './types';
-import { seedDatabase } from './seed';
 import { cn } from './lib/utils';
 
 // --- Components ---
@@ -1183,12 +1182,6 @@ const AdminDashboard = () => {
                 className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold transition-all"
               >
                 Transition to Round 2
-              </button>
-              <button 
-                onClick={seedDatabase}
-                className="w-full py-3 bg-cyan-900/30 border border-cyan-500/30 text-cyan-400 rounded-xl font-bold transition-all hover:bg-cyan-900/50"
-              >
-                Seed Sample Data
               </button>
               <a 
                 href="?display=true" 
