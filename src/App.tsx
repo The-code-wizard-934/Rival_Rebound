@@ -1465,7 +1465,8 @@ const StudentView = () => {
 
     let finalPoints = points;
     if (!isCorrect && isRound2 && isTeamMember) {
-      finalPoints = -Math.floor(currentQuestion.points / 2);
+      // Penalty: deduct 1/4 of question value
+      finalPoints = -Math.floor(currentQuestion.points / 4);
     }
 
     const userPointsToAward = isAudience ? 0 : finalPoints;
@@ -1485,19 +1486,27 @@ const StudentView = () => {
       });
 
       if (userPointsToAward !== 0) {
+        // Prevent round2Score from becoming negative
+        const currentR2 = profile.round2Score ?? 0;
+        const finalR2Increment = (currentR2 + userPointsToAward < 0) ? -currentR2 : userPointsToAward;
+
         const userUpdates: any = {
-          totalScore: increment(userPointsToAward)
+          totalScore: increment(userPointsToAward) // Career score can be negative or we just allow it
         };
         if (isRound2) {
-          userUpdates.round2Score = increment(userPointsToAward);
+          userUpdates.round2Score = increment(finalR2Increment);
         }
         batch.update(doc(db, 'users', profile.uid), userUpdates);
       }
 
-      // ✅ Uses resolvedTeamId, NOT profile.teamId
+      // ✅ Team Score logic - also prevent team score from going below zero if desired
       if (isTeamMember && resolvedTeamId && finalPoints !== 0) {
+        const teamSnap = await getDoc(doc(db, 'teams', resolvedTeamId));
+        const currentTeamScore = teamSnap.data()?.totalScore || 0;
+        const finalTeamIncrement = (currentTeamScore + finalPoints < 0) ? -currentTeamScore : finalPoints;
+
         batch.update(doc(db, 'teams', resolvedTeamId), {
-          totalScore: increment(finalPoints),
+          totalScore: increment(finalTeamIncrement),
         });
       }
 

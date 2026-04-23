@@ -54,7 +54,9 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'email', 'role']) &&
              data.uid is string &&
              data.email is string &&
-             data.role in ['admin', 'student'];
+             data.role in ['admin', 'student'] &&
+             (!data.keys().contains('displayName') || data.displayName is string) &&
+             (!data.keys().contains('photoURL') || data.photoURL is string);
     }
 
     function isValidResponse(data) {
@@ -81,7 +83,8 @@ service cloud.firestore {
         isAdmin() || (
           isOwner(uid) && 
           incoming().role == existing().role &&
-          incoming().get('teamId', null) == existing().get('teamId', null)
+          incoming().get('teamId', null) == existing().get('teamId', null) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['totalScore', 'round2Score', 'displayName', 'photoURL'])
         )
       );
       allow delete: if isAdmin();
