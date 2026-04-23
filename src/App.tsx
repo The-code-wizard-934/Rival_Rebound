@@ -672,7 +672,7 @@ const AdminDashboard = () => {
   const [adminMessage, setAdminMessage] = useState<{ text: string, type: 'info' | 'error' } | null>(null);
   const [showDangerZone, setShowDangerZone] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
-  const [pendingAction, setPendingAction] = useState<'remove_participants' | 'clear_q1' | 'clear_q2' | null>(null);
+  const [pendingAction, setPendingAction] = useState<'remove_participants' | 'clear_q1' | 'clear_q2' | 'back_to_r1' | null>(null);
   const [undoTask, setUndoTask] = useState<{ label: string; execute: () => Promise<void>; timeLeft: number } | null>(null);
   const [activeRoundTab, setActiveRoundTab] = useState<number>(1);
   const [teams, setTeams] = useState<(Team & { members: UserProfile[] })[]>([]);
@@ -789,35 +789,51 @@ const AdminDashboard = () => {
 
   const resetGame = async () => {
     try {
-      const batch = writeBatch(db);
-      
       // 1. Reset Game State
-      batch.update(doc(db, 'game_state', 'current'), { 
+      await setDoc(doc(db, 'game_state', 'current'), { 
         status: 'idle', 
         currentQuestionId: null,
         round: 1,
         startTime: null
-      });
+      }, { merge: true });
 
+      const updates: { ref: any, data: any }[] = [];
+      const deletes: any[] = [];
+      
       // 2. Reset User Scores and Team associations
       const usersSnap = await getDocs(collection(db, 'users'));
       usersSnap.docs.forEach(d => {
-        batch.update(d.ref, { totalScore: 0, teamId: null });
+        updates.push({ ref: d.ref, data: { totalScore: 0, round2Score: 0, teamId: null } });
       });
 
       // 3. Reset Team Scores
       const teamsSnap = await getDocs(collection(db, 'teams'));
       teamsSnap.docs.forEach(d => {
-        batch.update(d.ref, { totalScore: 0 });
+        updates.push({ ref: d.ref, data: { totalScore: 0 } });
       });
 
       // 4. Delete Responses
       const responsesSnap = await getDocs(collection(db, 'responses'));
       responsesSnap.docs.forEach(d => {
-        batch.delete(d.ref);
+        deletes.push(d.ref);
       });
 
-      await batch.commit();
+      // Execute updates in batches
+      for (let i = 0; i < updates.length; i += 500) {
+        const batch = writeBatch(db);
+        const chunk = updates.slice(i, i + 500);
+        chunk.forEach(item => batch.update(item.ref, item.data));
+        await batch.commit();
+      }
+
+      // Execute deletes in batches
+      for (let i = 0; i < deletes.length; i += 500) {
+        const batch = writeBatch(db);
+        const chunk = deletes.slice(i, i + 500);
+        chunk.forEach(ref => batch.delete(ref));
+        await batch.commit();
+      }
+
       setAdminMessage({ text: "Game, scores, and responses reset successfully", type: 'info' });
       setConfirmReset(false);
     } catch (error) {
@@ -849,23 +865,52 @@ const AdminDashboard = () => {
   const removeAllParticipants = async () => {
     const execute = async () => {
       try {
-        const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
-        const batch = writeBatch(db);
-        snap.docs.forEach(d => batch.delete(d.ref));
+        const refsToDelete: any[] = [];
         
-        // Also clear teams as they refer to users
+        // 1. Get students
+        const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
+        snap.docs.forEach(d => refsToDelete.push(d.ref));
+        
+        // 2. Get teams
         const teamsSnap = await getDocs(collection(db, 'teams'));
-        teamsSnap.docs.forEach(d => batch.delete(d.ref));
+        teamsSnap.docs.forEach(d => refsToDelete.push(d.ref));
 
-        await batch.commit();
-        setAdminMessage({ text: "All participants and teams removed", type: 'info' });
+        // 3. Get responses
+        const responsesSnap = await getDocs(collection(db, 'responses'));
+        responsesSnap.docs.forEach(d => refsToDelete.push(d.ref));
+
+        // Execute in batches of 500
+        for (let i = 0; i < refsToDelete.length; i += 500) {
+          const batch = writeBatch(db);
+          const chunk = refsToDelete.slice(i, i + 500);
+          chunk.forEach(ref => batch.delete(ref));
+          await batch.commit();
+        }
+
+        setAdminMessage({ text: "All participants, teams, and responses removed", type: 'info' });
       } catch (error) {
+        console.error("Cleanup failed:", error);
         setAdminMessage({ text: "Failed to remove participants", type: 'error' });
       }
     };
 
     scheduleTask("Remove All Participants", execute);
     setPendingAction(null);
+  };
+
+  const resetToRound1 = async () => {
+    try {
+      await updateGameState({
+        status: 'idle',
+        currentQuestionId: null,
+        round: 1,
+        startTime: null
+      });
+      setAdminMessage({ text: "Returned to Round 1 (Scores preserved)", type: 'info' });
+      setPendingAction(null);
+    } catch (error) {
+      setAdminMessage({ text: "Failed to return to Round 1", type: 'error' });
+    }
   };
 
   const deleteQuestion = async (id: string) => {
@@ -909,7 +954,10 @@ const AdminDashboard = () => {
         memberUids, 
         totalScore: 0 
       });
-      memberUids.forEach(uid => teamsBatch.update(doc(db, 'users', uid), { teamId }));
+      memberUids.forEach(uid => teamsBatch.update(doc(db, 'users', uid), { 
+        teamId,
+        round2Score: 0
+      }));
     }
     await teamsBatch.commit(); // ✅ teamIds land on students FIRST
 
@@ -1258,6 +1306,23 @@ const AdminDashboard = () => {
                               </button>
                             )}
                           </div>
+
+                          {pendingAction === 'back_to_r1' ? (
+                            <div className="p-2 bg-red-600/10 border border-red-500/20 rounded-xl space-y-2">
+                              <p className="text-[9px] font-bold text-red-400 text-center leading-none">Return to Round 1? (Scores will be kept)</p>
+                              <div className="flex gap-1">
+                                <button onClick={resetToRound1} className="flex-1 py-1 bg-red-600 text-white rounded-md text-[9px] font-bold">Yes, Return</button>
+                                <button onClick={() => setPendingAction(null)} className="flex-1 py-1 bg-white/10 text-white rounded-md text-[9px] font-bold">Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button 
+                              onClick={() => setPendingAction('back_to_r1')}
+                              className="w-full py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2"
+                            >
+                              <RotateCcw className="w-3 h-3" /> Return to Round 1
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1420,9 +1485,13 @@ const StudentView = () => {
       });
 
       if (userPointsToAward !== 0) {
-        batch.update(doc(db, 'users', profile.uid), {
-          totalScore: increment(userPointsToAward),
-        });
+        const userUpdates: any = {
+          totalScore: increment(userPointsToAward)
+        };
+        if (isRound2) {
+          userUpdates.round2Score = increment(userPointsToAward);
+        }
+        batch.update(doc(db, 'users', profile.uid), userUpdates);
       }
 
       // ✅ Uses resolvedTeamId, NOT profile.teamId
@@ -1465,8 +1534,8 @@ const StudentView = () => {
               <h1 className="text-4xl font-black text-white mb-6 uppercase tracking-tight">{team.name}</h1>
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="p-4 bg-white/5 border border-white/10 rounded-2xl text-center">
-                  <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Your Score</div>
-                  <div className="text-2xl font-black text-white">{profile.totalScore}</div>
+                  <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Your Contribution</div>
+                  <div className="text-2xl font-black text-white">{profile.round2Score ?? 0}</div>
                 </div>
                 <div className="p-4 bg-white/5 border border-white/10 rounded-2xl text-center">
                   <div className="text-[10px] font-black text-cyan-500 uppercase tracking-widest mb-1">Team Score</div>
@@ -1481,10 +1550,11 @@ const StudentView = () => {
                     <img src={member.photoURL} className="w-10 h-10 rounded-full border border-cyan-500/30" referrerPolicy="no-referrer" />
                     <div className="flex-1">
                       <p className="text-sm font-bold text-white leading-none mb-1">{member.displayName}</p>
-                      <p className="text-[10px] text-gray-500 font-mono">{member.uid === profile.uid ? 'YOU' : 'TEAMMATE'}</p>
+                      <p className="text-[10px] text-gray-500 font-mono uppercase tracking-widest">{member.uid === profile.uid ? 'YOU' : 'TEAMMATE'}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs font-black text-cyan-400">{member.totalScore}</p>
+                      <p className="text-xs font-black text-cyan-400">{member.round2Score ?? 0}</p>
+                      <p className="text-[8px] font-black text-gray-600 uppercase">R2 PTS</p>
                     </div>
                   </div>
                 ))}

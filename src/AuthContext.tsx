@@ -61,6 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           photoURL: user.photoURL || '',
           role: user.email === 'yashbose35@gmail.com' ? 'admin' : 'student',
           totalScore: 0,
+          round2Score: 0,
         };
         try {
           await setDoc(userDocRef, newProfile);

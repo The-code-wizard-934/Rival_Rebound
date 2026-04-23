@@ -9,6 +9,7 @@ export interface UserProfile {
   photoURL: string;
   role: UserRole;
   totalScore: number;
+  round2Score?: number;
   teamId?: string;
 }
 
